@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NEON BEAT TAPPER</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-dark: #0a0a12;
+    --track-bg: rgba(15, 15, 30, 0.6);
+    --neon-blue: #00f0ff;
+    --neon-pink: #ff007f;
+    --neon-purple: #9d00ff;
+    --neon-green: #39ff14;
+    --white: #ffffff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg-dark);
+    font-family: 'Orbitron', sans-serif;
+    color: var(--white);
+    user-select: none;
+  }
+  #wrap {
+    position: relative; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  canvas {
+    display: block;
+    background: radial-gradient(circle at center, #14142b 0%, #05050a 100%);
+    box-shadow: 0 0 30px rgba(157, 0, 255, 0.2);
+    max-width: 100%; max-height: 100%;
+  }
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 25px;
+    pointer-events: none;
+    text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+  }
+  .score-box { font-size: 24px; font-weight: 700; letter-spacing: 2px; }
+  .score-box span { color: var(--neon-blue); }
+  .combo-box { font-size: 28px; font-weight: 900; text-align: center; }
+  .combo-box span { color: var(--neon-pink); display: block; font-size: 14px; letter-spacing: 1px; }
+
+  #overlay {
+    position: absolute; inset: 0;
+    background: rgba(10, 10, 18, 0.95);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 20px;
+    z-index: 10;
+    border: 2px solid var(--neon-purple);
+  }
+  #overlay h1 {
+    font-size: clamp(32px, 8vw, 64px);
+    margin: 0 0 10px 0;
+    letter-spacing: 4px;
+    background: linear-gradient(45deg, var(--neon-blue), var(--neon-pink));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 15px rgba(0, 240, 255, 0.3));
+  }
+  #overlay p { font-size: 16px; color: #8fa0dd; margin: 0 0 30px 0; letter-spacing: 2px; }
+  .instructions {
+    font-size: 14px; color: #a5b4fc; max-width: 400px; line-height: 1.6; margin-bottom: 30px;
+  }
+  .key-guides {
+    display: flex; gap: 15px; margin-bottom: 35px;
+  }
+  .key-cap {
+    width: 50px; height: 50px; border: 2px solid var(--neon-blue);
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 900; color: var(--neon-blue);
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
+  }
+  button.play-btn {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 20px; font-weight: 900; letter-spacing: 3px;
+    background: transparent;
+    color: var(--neon-pink);
+    border: 2px solid var(--neon-pink);
+    padding: 15px 45px; border-radius: 50px;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(255, 0, 127, 0.2);
+    transition: all 0.2s ease;
+  }
+  button.play-btn:hover {
+    background: var(--neon-pink);
+    color: var(--bg-dark);
+    box-shadow: 0 0 25px var(--neon-pink);
+  }
+  #rating {
+    position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 48px; font-weight: 900; letter-spacing: 2px;
+    opacity: 0; pointer-events: none;
+    transition: transform 0.1s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.1s ease;
+    text-shadow: 0 0 15px currentColor;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="score-box">SCORE: <span id="scoreVal">000000</span></div>
+    <div class="combo-box" id="comboContainer" style="display:none;">
+      <span id="comboVal">0</span>
+      <span>COMBO</span>
+    </div>
+  </div>
+
+  <div id="rating">PERFECT</div>
+
+  <div id="overlay">
+    <h1>NEON TAPPER</h1>
+    <p>RHYTHM SENSATION</p>
+    <div class="instructions">
+      Tap the matching keys right as the neon energy nodes pass through the receptors at the bottom! 
+    </div>
+    <div class="key-guides">
+      <div class="key-cap">D</div>
+      <div class="key-cap">F</div>
+      <div class="key-cap">J</div>
+      <div class="key-cap">K</div>
+    </div>
+    <button class="play-btn" id="playBtn">SYNC STREAM</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const playBtn = document.getElementById('playBtn');
+  const scoreVal = document.getElementById('scoreVal');
+  const comboVal = document.getElementById('comboVal');
+  const comboContainer = document.getElementById('comboContainer');
+  const ratingText = document.getElementById('rating');
+
+  let W, H, DPR;
+  function resize() {
+    const wrap = document.getElementById('wrap');
+    let w = Math.min(window.innerWidth, 480);
+    let h = window.innerHeight;
+    DPR = window.devicePixelRatio || 1;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    W = w; H = h;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Web Audio Engine ----------
+  let audioCtx = null;
+  function initAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  function playHitSound(freq, type = 'sine', duration = 0.1) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+  }
+
+  // Simple procedural drum beat generator
+  let lastBeatTime = 0;
+  let beatCounter = 0;
+  function updateMusicLoop() {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    // Play a synth kick and snare sequence (120 BPM -> 0.5s per beat)
+    if (now - lastBeatTime > 0.5) {
+      lastBeatTime = now;
+      if (beatCounter % 2 === 0) {
+        // Kick Drum sound
+        playHitSound(100, 'triangle', 0.15);
+      } else {
+        // Snare/Noise sound
+        playHitSound(350, 'sine', 0.12);
+      }
+      // Spawns game notes aligned with the beat sequence
+      spawnBeatNotes();
+      beatCounter++;
+    }
+  }
+
+  // ---------- Game Configuration ----------
+  const keys = ['KeyD', 'KeyF', 'KeyJ', 'KeyK'];
+  const colColors = ['#00f0ff', '#ff007f', '#9d00ff', '#39ff14'];
+  const keyLabels = ['D', 'F', 'J', 'K'];
+  const keyState = [false, false, false, false];
+
+  let state = 'menu';
+  let score = 0;
+  let combo = 0;
+  let notes = [];
+  let hitEffects = [0, 0, 0, 0]; // Timers to draw button press glows
+
+  const receptorY = H * 0.85;
+  const receptorR = 24;
+  const noteSpeed = 6.5;
+
+  function spawnBeatNotes() {
+    // Generate a random pattern on the 4 columns
+    const colsActive = [false, false, false, false];
+    const notesToSpawn = Math.random() < 0.4 ? 2 : 1; // Sometimes double notes!
+    
+    let spawned = 0;
+    while(spawned < notesToSpawn) {
+      const col = Math.floor(Math.random() * 4);
+      if (!colsActive[col]) {
+        colsActive[col] = true;
+        notes.push({
+          col: col,
+          y: -20,
+          hit: false
+        });
+        spawned++;
+      }
+    }
+  }
+
+  // ---------- Controls ----------
+  window.addEventListener('keydown', e => {
+    if (state !== 'playing') return;
+    const idx = keys.indexOf(e.code);
+    if (idx !== -1 && !keyState[idx]) {
+      keyState[idx] = true;
+      hitEffects[idx] = 8; // trigger key press flash
+      checkHit(idx);
+    }
+  });
+
+  window.addEventListener('keyup', e => {
+    const idx = keys.indexOf(e.code);
+    if (idx !== -1) {
+      keyState[idx] = false;
+    }
+  });
+
+  // Touch Support
+  window.addEventListener('touchstart', e => {
+    if (state !== 'playing') return;
+    const t = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const touchX = t.clientX - rect.left;
+    const colWidth = W / 4;
+    const colIdx = Math.floor(touchX / colWidth);
+    if (colIdx >= 0 && colIdx < 4) {
+      hitEffects[colIdx] = 8;
+      checkHit(colIdx);
+    }
+  });
+
+  function checkHit(col) {
+    let matched = false;
+    for (let note of notes) {
+      if (note.col === col && !note.hit) {
+        const dist = Math.abs(note.y - receptorY);
+        if (dist < 65) { // Hit window
+          note.hit = true;
+          matched = true;
+          
+          let rating = "GOOD";
+          let scoreAdd = 50;
+          let color = '#ff007f';
+
+          if (dist <= 15) {
+            rating = "PERFECT";
+            scoreAdd = 150;
+            color = '#00f0ff';
+            playHitSound(523.25, 'sine', 0.15); // C5
+          } else if (dist <= 35) {
+            rating = "GREAT";
+            scoreAdd = 100;
+            color = '#39ff14';
+            playHitSound(392.00, 'sine', 0.12); // G4
+          } else {
+            playHitSound(261.63, 'sine', 0.1); // C4
+          }
+
+          score += scoreAdd;
+          combo++;
+          showRating(rating, color);
+          break;
+        }
+      }
+    }
+
+    if (!matched) {
+      // Missed / Blind Tap
+      playHitSound(120, 'sawtooth', 0.1);
+    }
+    updateHUD();
+  }
+
+  function showRating(text, color) {
+    ratingText.textContent = text;
+    ratingText.style.color = color;
+    ratingText.style.opacity = '1';
+    ratingText.style.transform = 'translate(-50%, -50%) scale(1.2)';
+    setTimeout(() => {
+      ratingText.style.opacity = '0';
+      ratingText.style.transform = 'translate(-50%, -50%) scale(1)';
+    }, 200);
+  }
+
+  function updateHUD() {
+    scoreVal.textContent = String(score).padStart(6, '0');
+    if (combo > 2) {
+      comboContainer.style.display = 'block';
+      comboVal.textContent = combo;
+    } else {
+      comboContainer.style.display = 'none';
+    }
+  }
+
+  // ---------- Engine Loops ----------
+  function update() {
+    updateMusicLoop();
+
+    // Move notes down
+    for (let note of notes) {
+      note.y += noteSpeed;
+      // If note passes receptor undetected
+      if (note.y > receptorY + 45 && !note.hit) {
+        note.hit = true;
+        combo = 0; // Break combo
+        showRating("MISS", "#555555");
+        updateHUD();
+      }
+    }
+
+    // Clean up dead notes
+    notes = notes.filter(n => n.y < H + 30);
+
+    // Fade active key glows
+    for (let i = 0; i < 4; i++) {
+      if (hitEffects[i] > 0) hitEffects[i]--;
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    const colWidth = W / 4;
+
+    // 1. Draw Track lanes
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+      ctx.fillRect(i * colWidth, 0, colWidth, H);
+      
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(i * colWidth, 0);
+      ctx.lineTo(i * colWidth, H);
+      ctx.stroke();
+    }
+
+    // 2. Draw Receptors (Hit Zones) at the bottom
+    for (let i = 0; i < 4; i++) {
+      const cx = i * colWidth + colWidth / 2;
+      
+      // Outer neon ring
+      ctx.strokeStyle = colColors[i];
+      ctx.lineWidth = keyState[i] ? 4 : 2;
+      ctx.shadowBlur = keyState[i] ? 15 : 5;
+      ctx.shadowColor = colColors[i];
+      ctx.beginPath();
+      ctx.arc(cx, receptorY, receptorR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Tap key letters
+      ctx.fillStyle = keyState[i] ? colColors[i] : 'rgba(255, 255, 255, 0.3)';
+      ctx.font = 'bold 16px Orbitron';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(keyLabels[i], cx, receptorY);
+
+      // Hit effect blast wave
+      if (hitEffects[i] > 0) {
+        ctx.strokeStyle = colColors[i];
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(cx, receptorY, receptorR + (8 - hitEffects[i]) * 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // 3. Draw Falling Notes
+    for (let note of notes) {
+      if (note.hit) continue;
+      const cx = note.col * colWidth + colWidth / 2;
+
+      ctx.save();
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = colColors[note.col];
+      
+      // Neon Core
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, note.y, 14, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Colored Ring
+      ctx.strokeStyle = colColors[note.col];
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(cx, note.y, 18, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  function loop() {
+    if (state === 'playing') {
+      update();
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+
+  playBtn.addEventListener('click', () => {
+    initAudio();
+    overlay.style.display = 'none';
+    state = 'playing';
+    score = 0;
+    combo = 0;
+    notes = [];
+    lastBeatTime = audioCtx.currentTime;
+    updateHUD();
+    loop();
+  });
+
+  resize();
+  draw();
+})();
+</script>
+</body>
+</html>
