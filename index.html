@@ -131,4 +131,342 @@
 
   <div id="overlay">
     <h1>NEON TAPPER</h1>
-    <p>SELECT DIFFICULTY</p
+    <p>SELECT DIFFICULTY</p>
+    
+    <div class="diff-selector">
+      <button class="diff-btn active" data-diff="easy">EASY</button>
+      <button class="diff-btn" data-diff="medium">MEDIUM</button>
+      <button class="diff-btn" data-diff="hard">HARD</button>
+    </div>
+
+    <div class="key-guides">
+      <div class="key-cap">D</div>
+      <div class="key-cap">F</div>
+      <div class="key-cap">J</div>
+      <div class="key-cap">K</div>
+    </div>
+    <button class="play-btn" id="playBtn">SYNC STREAM</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const playBtn = document.getElementById('playBtn');
+  const scoreVal = document.getElementById('scoreVal');
+  const comboVal = document.getElementById('comboVal');
+  const comboContainer = document.getElementById('comboContainer');
+  const ratingText = document.getElementById('rating');
+  const diffButtons = document.querySelectorAll('.diff-btn');
+
+  let W, H, DPR;
+  let currentDifficulty = 'easy';
+
+  // Difficulty Configurations
+  const diffSettings = {
+    easy: { speed: 4.0, spawnChance: 0.5, bpmInterval: 0.6 }, // Slower notes, chill pattern
+    medium: { speed: 6.0, spawnChance: 0.7, bpmInterval: 0.45 }, 
+    hard: { speed: 8.5, spawnChance: 0.85, bpmInterval: 0.35 }  // Lightning fast rhythm
+  };
+
+  function resize() {
+    let w = Math.min(window.innerWidth, 480);
+    let h = window.innerHeight;
+    DPR = window.devicePixelRatio || 1;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    W = w; H = h;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Difficulty Button Click Handlers ----------
+  diffButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      diffButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentDifficulty = btn.getAttribute('data-diff');
+    });
+  });
+
+  // ---------- Web Audio Engine ----------
+  let audioCtx = null;
+  function initAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  function playHitSound(freq, type = 'sine', duration = 0.1) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+  }
+
+  let lastBeatTime = 0;
+  let beatCounter = 0;
+  function updateMusicLoop() {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    const interval = diffSettings[currentDifficulty].bpmInterval;
+
+    if (now - lastBeatTime > interval) {
+      lastBeatTime = now;
+      if (beatCounter % 2 === 0) {
+        playHitSound(110, 'triangle', 0.15); // Kick Drum
+      } else {
+        playHitSound(380, 'sine', 0.1); // Snare Synth
+      }
+      spawnBeatNotes();
+      beatCounter++;
+    }
+  }
+
+  // ---------- Game Setup ----------
+  const keys = ['KeyD', 'KeyF', 'KeyJ', 'KeyK'];
+  const colColors = ['#00f0ff', '#ff007f', '#9d00ff', '#39ff14'];
+  const keyLabels = ['D', 'F', 'J', 'K'];
+  const keyState = [false, false, false, false];
+
+  let state = 'menu';
+  let score = 0;
+  let combo = 0;
+  let notes = [];
+  let hitEffects = [0, 0, 0, 0];
+
+  const receptorY = H * 0.85;
+  const receptorR = 24;
+
+  // Easy mode uses a smooth patterned structure, Hard uses random chaos
+  let easyPatternIndex = 0;
+  const easySequence = [0, 1, 2, 3, 2, 1]; 
+
+  function spawnBeatNotes() {
+    const settings = diffSettings[currentDifficulty];
+    if (Math.random() > settings.spawnChance) return; 
+
+    if (currentDifficulty === 'easy') {
+      // Predictable visual flow for Easy mode
+      let col = easySequence[easyPatternIndex % easySequence.length];
+      notes.push({ col: col, y: -20, hit: false });
+      easyPatternIndex++;
+    } else {
+      // Medium and Hard chaos loops
+      const col = Math.floor(Math.random() * 4);
+      notes.push({ col: col, y: -20, hit: false });
+      
+      // Hard mode can spawn double drops!
+      if (currentDifficulty === 'hard' && Math.random() < 0.3) {
+        let col2 = (col + 2) % 4;
+        notes.push({ col: col2, y: -20, hit: false });
+      }
+    }
+  }
+
+  // ---------- Controls ----------
+  window.addEventListener('keydown', e => {
+    if (state !== 'playing') return;
+    const idx = keys.indexOf(e.code);
+    if (idx !== -1 && !keyState[idx]) {
+      keyState[idx] = true;
+      hitEffects[idx] = 8;
+      checkHit(idx);
+    }
+  });
+
+  window.addEventListener('keyup', e => {
+    const idx = keys.indexOf(e.code);
+    if (idx !== -1) keyState[idx] = false;
+  });
+
+  window.addEventListener('touchstart', e => {
+    if (state !== 'playing') return;
+    const t = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const touchX = t.clientX - rect.left;
+    const colWidth = W / 4;
+    const colIdx = Math.floor(touchX / colWidth);
+    if (colIdx >= 0 && colIdx < 4) {
+      hitEffects[colIdx] = 8;
+      checkHit(colIdx);
+    }
+  });
+
+  function checkHit(col) {
+    let matched = false;
+    for (let note of notes) {
+      if (note.col === col && !note.hit) {
+        const dist = Math.abs(note.y - receptorY);
+        if (dist < 65) {
+          note.hit = true;
+          matched = true;
+          
+          let rating = "GOOD";
+          let scoreAdd = 50;
+          let color = '#ff007f';
+
+          if (dist <= 18) {
+            rating = "PERFECT";
+            scoreAdd = 150;
+            color = '#00f0ff';
+            playHitSound(523.25, 'sine', 0.15);
+          } else if (dist <= 38) {
+            rating = "GREAT";
+            scoreAdd = 100;
+            color = '#39ff14';
+            playHitSound(392.00, 'sine', 0.12);
+          } else {
+            playHitSound(261.63, 'sine', 0.1);
+          }
+
+          score += scoreAdd;
+          combo++;
+          showRating(rating, color);
+          break;
+        }
+      }
+    }
+
+    if (!matched) playHitSound(120, 'sawtooth', 0.1);
+    updateHUD();
+  }
+
+  function showRating(text, color) {
+    ratingText.textContent = text;
+    ratingText.style.color = color;
+    ratingText.style.opacity = '1';
+    ratingText.style.transform = 'translate(-50%, -50%) scale(1.2)';
+    setTimeout(() => {
+      ratingText.style.opacity = '0';
+      ratingText.style.transform = 'translate(-50%, -50%) scale(1)';
+    }, 200);
+  }
+
+  function updateHUD() {
+    scoreVal.textContent = String(score).padStart(6, '0');
+    if (combo > 2) {
+      comboContainer.style.display = 'block';
+      comboVal.textContent = combo;
+    } else {
+      comboContainer.style.display = 'none';
+    }
+  }
+
+  function update() {
+    updateMusicLoop();
+    const currentSpeed = diffSettings[currentDifficulty].speed;
+
+    for (let note of notes) {
+      note.y += currentSpeed;
+      if (note.y > receptorY + 45 && !note.hit) {
+        note.hit = true;
+        combo = 0;
+        showRating("MISS", "#555555");
+        updateHUD();
+      }
+    }
+
+    notes = notes.filter(n => n.y < H + 30);
+    for (let i = 0; i < 4; i++) {
+      if (hitEffects[i] > 0) hitEffects[i]--;
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    const colWidth = W / 4;
+
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+      ctx.fillRect(i * colWidth, 0, colWidth, H);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(i * colWidth, 0);
+      ctx.lineTo(i * colWidth, H);
+      ctx.stroke();
+    }
+
+    for (let i = 0; i < 4; i++) {
+      const cx = i * colWidth + colWidth / 2;
+      ctx.strokeStyle = colColors[i];
+      ctx.lineWidth = keyState[i] ? 4 : 2;
+      ctx.shadowBlur = keyState[i] ? 15 : 5;
+      ctx.shadowColor = colColors[i];
+      ctx.beginPath();
+      ctx.arc(cx, receptorY, receptorR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = keyState[i] ? colColors[i] : 'rgba(255, 255, 255, 0.3)';
+      ctx.font = 'bold 16px Orbitron';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(keyLabels[i], cx, receptorY);
+
+      if (hitEffects[i] > 0) {
+        ctx.strokeStyle = colColors[i];
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(cx, receptorY, receptorR + (8 - hitEffects[i]) * 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    for (let note of notes) {
+      if (note.hit) continue;
+      const cx = note.col * colWidth + colWidth / 2;
+      ctx.save();
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = colColors[note.col];
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(cx, note.y, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = colColors[note.col];
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(cx, note.y, 18, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function loop() {
+    if (state === 'playing') {
+      update();
+      draw();
+    }
+    requestAnimationFrame(loop);
+  }
+
+  playBtn.addEventListener('click', () => {
+    initAudio();
+    overlay.style.display = 'none';
+    state = 'playing';
+    score = 0;
+    combo = 0;
+    notes = [];
+    easyPatternIndex = 0;
+    lastBeatTime = audioCtx.currentTime;
+    updateHUD();
+    loop();
+  });
+
+  resize();
+  draw();
+})();
+</script>
+</body>
+</html>
